@@ -109,6 +109,11 @@ html_theme_options: "dict[str, Any]" = {
             "title": "Developers",
             "children": [
                 {
+                    "title": "GitHub",
+                    "url": "https://github.com/cofin/litestar-autowire",
+                    "summary": "Browse the source repository and issue tracker.",
+                },
+                {
                     "title": "Contributing",
                     "url": "contribution-guide",
                     "summary": "Set up the repo and follow project conventions.",
