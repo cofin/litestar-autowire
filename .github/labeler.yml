@@ -1,0 +1,86 @@
+version: v1
+
+labels:
+  # -- types -------------------------------------------------------------------
+  - label: 'type/feat'
+    sync: true
+    matcher:
+      title: '^feat(\([^)]+\))?!?:'
+
+  - label: 'type/bug'
+    sync: true
+    matcher:
+      title: '^fix(\([^)]+\))?!?:'
+
+  - label: 'type/docs'
+    sync: true
+    matcher:
+      title: '^docs(\([^)]+\))?:'
+
+  - label: 'Breaking 🔨'
+    sync: true
+    matcher:
+      title: '^(feat|fix)(\([^)]+\))?!:'
+
+  # -- distinct areas ----------------------------------------------------------
+
+  - label: 'area/docs'
+    sync: true
+    matcher:
+      files:
+        any: ['docs/*', 'docs/**/*', '**/*.rst', '**/*.md']
+
+  - label: 'area/unit-tests'
+    sync: true
+    matcher:
+      files:
+        any: ['tests/*', 'tests/**/*']
+
+  - label: 'area/ci'
+    sync: true
+    matcher:
+      files:
+        any: ['.github/**/*', '.pre-commit-config.yaml', '*.yaml', '*.yml']
+
+  - label: 'area/dependencies'
+    sync: true
+    matcher:
+      files:
+        any: ['pyproject.toml', '*.lock']
+
+  - label: 'area/private-api'
+    sync: true
+    matcher:
+      files:
+        any: ['litestar_autowire/_*.py', 'litestar_autowire/*/_*.py', 'litestar_autowire/_*/**/*.py']
+
+  # -- Size Based Labels -------------------------------------------------------
+  - label: 'size: small'
+    sync: true
+    matcher:
+      files:
+        count:
+          gte: 1
+          lte: 10
+
+  - label: 'size: medium'
+    sync: true
+    matcher:
+      files:
+        count:
+          gte: 10
+          lte: 25
+
+  - label: 'size: large'
+    sync: true
+    matcher:
+      files:
+        count:
+          gte: 26
+
+# -- Merge Checks --------------------------------------------------------------
+checks:
+  - context: 'No Merge check'
+    description: "Disable merging when 'do not merge' label is set"
+    labels:
+      none: ['do not merge']

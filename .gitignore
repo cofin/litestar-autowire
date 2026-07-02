@@ -1,0 +1,64 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build output
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+
+# Test and coverage output
+.coverage
+.coverage.*
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+coverage.xml
+coverage.json
+htmlcov/
+
+# Documentation output
+docs/_build/
+docs-build/
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Editor and local tool state
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+.cursorignore
+.cursorrules
+.zed/
+.claude/
+.gemini/
+.geminiignore
+.agents/
+.agent/
+.todos
+.tmp/
+.antigravitycli/
+
+# Local uv configuration
+uv.toml
+.python-version
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads-credential-key
+opencode.json
