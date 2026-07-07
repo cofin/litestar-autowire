@@ -80,8 +80,8 @@ Discovery Rules
     * - Queue tasks
       - ``jobs``
 
-Extensions
-==========
+Integrations
+============
 
 Use string aliases for built-in integrations:
 
