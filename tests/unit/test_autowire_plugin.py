@@ -10,10 +10,16 @@ from typing import Any, cast
 
 import pytest
 from litestar import Litestar, Router, get
-from litestar.config.app import AppConfig
 from litestar.testing import TestClient
 
-from litestar_autowire import AutowireConfig, AutowireExtension, AutowirePlugin, clear_autowire_cache
+from litestar_autowire import (
+    AutowireConfig,
+    AutowireContext,
+    AutowireIntegration,
+    AutowireLoader,
+    AutowirePlugin,
+    clear_autowire_cache,
+)
 from litestar_autowire.discovery import discover_controllers, discover_listeners
 
 
@@ -189,7 +195,7 @@ def test_autowire_plugin_can_wrap_discovered_controllers_in_router(
     assert response.json() == {"wrapped": "yes"}
 
 
-def test_autowire_plugin_can_enable_dishka_router_extension(
+def test_autowire_plugin_can_enable_dishka_router_integration(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
@@ -221,7 +227,7 @@ def test_autowire_plugin_can_enable_dishka_router_extension(
             AutowirePlugin(
                 AutowireConfig(
                     domain_packages=["example_app.features"],
-                    extensions=["dishka"],
+                    integrations=["dishka"],
                 ),
             )
         ],
@@ -234,61 +240,57 @@ def test_autowire_plugin_can_enable_dishka_router_extension(
     assert response.json() == {"extension": "dishka"}
 
 
-def test_autowire_config_normalizes_and_validates_extensions() -> None:
-    config = AutowireConfig(extensions="dishka")
+def test_autowire_config_normalizes_and_validates_integrations() -> None:
+    config = AutowireConfig(integrations="dishka")
 
-    assert config.extensions == ("dishka",)
-    assert config.extension_enabled("dishka")
-    with pytest.raises(ValueError, match="Unsupported Autowire extension"):
-        AutowireConfig(extensions=["not-installed-by-default"])
+    assert tuple(integration.name for integration in config.integrations) == ("dishka",)
+    assert config.integration_enabled("dishka")
+    with pytest.raises(ValueError, match="Unsupported Autowire integration"):
+        AutowireConfig(integrations=["not-installed-by-default"])
 
 
-def test_autowire_config_accepts_custom_extension_objects() -> None:
-    class CustomExtension:
+def test_autowire_config_accepts_custom_integration_objects() -> None:
+    class CustomIntegration:
         name = "custom"
 
-        def on_autowire(self, app_config: AppConfig, config: AutowireConfig) -> AppConfig:
-            assert isinstance(config, AutowireConfig)
-            return app_config
+        def on_autowire(self, context: AutowireContext) -> None:
+            assert isinstance(context.config, AutowireConfig)
 
-    extension: AutowireExtension = CustomExtension()
-    config = AutowireConfig(extensions=[extension])
+    integration: AutowireIntegration = CustomIntegration()
+    config = AutowireConfig(integrations=[integration])
 
-    assert config.extensions == (extension,)
-    assert config.custom_extensions == (extension,)
-    assert not config.extension_enabled("custom")
+    assert config.integrations == (integration,)
+    assert config.integration_enabled("custom")
 
 
-def test_autowire_config_rejects_invalid_custom_extension_objects() -> None:
-    with pytest.raises(TypeError, match="Autowire extension objects"):
-        AutowireConfig(extensions=cast("Any", [object()]))
+def test_autowire_config_rejects_invalid_custom_integration_objects() -> None:
+    with pytest.raises(TypeError, match="Autowire integration objects"):
+        AutowireConfig(integrations=cast("Any", [object()]))
 
 
-def test_autowire_config_rejects_custom_extension_builtin_name_collisions() -> None:
+def test_autowire_config_rejects_custom_integration_builtin_name_collisions() -> None:
     class QueuesExtension:
         name = "queues"
 
-        def on_autowire(self, app_config: AppConfig, config: AutowireConfig) -> AppConfig:
-            assert isinstance(config, AutowireConfig)
-            return app_config
+        def on_autowire(self, context: AutowireContext) -> None:
+            assert isinstance(context.config, AutowireConfig)
 
-    with pytest.raises(ValueError, match="conflict with built-in extension"):
-        AutowireConfig(extensions=[QueuesExtension()])
+    with pytest.raises(ValueError, match="conflict with built-in integration"):
+        AutowireConfig(integrations=[QueuesExtension()])
 
 
-def test_autowire_plugin_runs_custom_extensions(tmp_path: Path, monkeypatch: Any) -> None:
+def test_autowire_plugin_runs_custom_integrations(tmp_path: Path, monkeypatch: Any) -> None:
     _create_package(tmp_path, monkeypatch)
 
-    class CustomRouteExtension:
+    class CustomRouteIntegration:
         name = "custom-route"
 
-        def on_autowire(self, app_config: AppConfig, config: AutowireConfig) -> AppConfig:
+        def on_autowire(self, context: AutowireContext) -> None:
             @get("/custom-extension", sync_to_thread=False)
             def custom_extension() -> dict[str, str]:
-                return {"extension": self.name, "domain_packages": ",".join(config.domain_packages)}
+                return {"integration": self.name, "domain_packages": ",".join(context.config.domain_packages)}
 
-            app_config.route_handlers.append(custom_extension)
-            return app_config
+            context.app_config.route_handlers.append(custom_extension)
 
     clear_autowire_cache()
     app = Litestar(
@@ -298,7 +300,7 @@ def test_autowire_plugin_runs_custom_extensions(tmp_path: Path, monkeypatch: Any
                     domain_packages=["example_app.features"],
                     discover_controllers=False,
                     discover_listeners=False,
-                    extensions=[CustomRouteExtension()],
+                    integrations=[CustomRouteIntegration()],
                 ),
             )
         ],
@@ -308,7 +310,116 @@ def test_autowire_plugin_runs_custom_extensions(tmp_path: Path, monkeypatch: Any
         response = client.get("/custom-extension")
 
     assert response.status_code == 200
-    assert response.json() == {"extension": "custom-route", "domain_packages": "example_app.features"}
+    assert response.json() == {"integration": "custom-route", "domain_packages": "example_app.features"}
+
+
+def test_autowire_loader_calls_callable_for_existing_feature_modules(tmp_path: Path, monkeypatch: Any) -> None:
+    _create_package(tmp_path, monkeypatch)
+    _write(tmp_path / "example_app" / "features" / "accounts" / "jobs.py")
+    calls: list[str] = []
+
+    def load_jobs(module_path: str) -> None:
+        calls.append(module_path)
+
+    clear_autowire_cache()
+    Litestar(
+        plugins=[
+            AutowirePlugin(
+                AutowireConfig(
+                    domain_packages=["example_app.features"],
+                    discover_controllers=False,
+                    discover_listeners=False,
+                    integrations=[
+                        AutowireLoader(
+                            name="dma_jobs",
+                            modules="jobs",
+                            loader=load_jobs,
+                        )
+                    ],
+                ),
+            )
+        ],
+    )
+
+    assert calls == ["example_app.features.accounts.jobs"]
+
+
+def test_autowire_loader_resolves_dotted_loader_strings(tmp_path: Path, monkeypatch: Any) -> None:
+    _create_package(tmp_path, monkeypatch)
+    _write(tmp_path / "example_app" / "features" / "accounts" / "jobs.py")
+    _write(
+        tmp_path / "example_loader.py",
+        """
+        CALLED = []
+
+        def load_jobs(module_path: str) -> None:
+            CALLED.append(module_path)
+        """,
+    )
+
+    clear_autowire_cache()
+    Litestar(
+        plugins=[
+            AutowirePlugin(
+                AutowireConfig(
+                    domain_packages=["example_app.features"],
+                    discover_controllers=False,
+                    discover_listeners=False,
+                    integrations=[
+                        AutowireLoader(
+                            name="dma_jobs",
+                            modules="jobs",
+                            loader="example_loader:load_jobs",
+                        )
+                    ],
+                ),
+            )
+        ],
+    )
+
+    loader_module = importlib.import_module("example_loader")
+    assert loader_module.CALLED == ["example_app.features.accounts.jobs"]
+
+
+def test_autowire_loader_reraises_missing_dependency_from_existing_module(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    _create_package(tmp_path, monkeypatch)
+    _write(
+        tmp_path / "example_app" / "features" / "accounts" / "jobs.py",
+        """
+        import missing_autowire_job_dependency
+        """,
+    )
+    calls: list[str] = []
+
+    def load_jobs(module_path: str) -> None:
+        calls.append(module_path)
+
+    clear_autowire_cache()
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        Litestar(
+            plugins=[
+                AutowirePlugin(
+                    AutowireConfig(
+                        domain_packages=["example_app.features"],
+                        discover_controllers=False,
+                        discover_listeners=False,
+                        integrations=[
+                            AutowireLoader(
+                                name="dma_jobs",
+                                modules="jobs",
+                                loader=load_jobs,
+                            )
+                        ],
+                    ),
+                )
+            ],
+        )
+
+    assert exc_info.value.name == "missing_autowire_job_dependency"
+    assert calls == []
 
 
 def test_autowire_plugin_logs_loaded_domains(
@@ -407,7 +518,7 @@ def test_autowire_plugin_can_discover_litestar_queue_tasks(tmp_path: Path, monke
                     domain_packages=("example_app.features",),
                     discover_controllers=False,
                     discover_listeners=False,
-                    extensions=["queues"],
+                    integrations=["queues"],
                 )
             )
         ],

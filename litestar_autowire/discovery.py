@@ -65,11 +65,10 @@ def discover_controllers(
         return list(cached)
 
     discovered: list[type[Controller]] = []
-    for package_name in package_tuple:
-        for feature_package in _iter_feature_packages(package_name):
-            for module_name in module_tuple:
-                module_path = f"{feature_package}.{module_name}"
-                discovered.extend(_discover_controllers_in_module_path(module_path))
+    for feature_package in discover_feature_packages(package_tuple):
+        for module_name in module_tuple:
+            module_path = f"{feature_package}.{module_name}"
+            discovered.extend(_discover_controllers_in_module_path(module_path))
 
     result = _dedupe(discovered)
     _controller_cache[cache_key] = result
@@ -89,11 +88,10 @@ def discover_listeners(
         return list(cached)
 
     discovered: list[EventListener] = []
-    for package_name in package_tuple:
-        for feature_package in _iter_feature_packages(package_name):
-            for module_name in module_tuple:
-                module_path = f"{feature_package}.{module_name}"
-                discovered.extend(_discover_listeners_in_module_path(module_path))
+    for feature_package in discover_feature_packages(package_tuple):
+        for module_name in module_tuple:
+            module_path = f"{feature_package}.{module_name}"
+            discovered.extend(_discover_listeners_in_module_path(module_path))
     result = _dedupe(discovered)
     _listener_cache[cache_key] = result
     return list(result)
@@ -133,6 +131,19 @@ def discover_queue_tasks(
             discovered = discover_tasks(package_name, subpackage=module_name, force_reload=force_reload)
             task_names.update(discovered)
     return tuple(sorted(task_names))
+
+
+def discover_feature_packages(packages: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Discover configured package roots and their direct feature child packages."""
+    discovered: list[str] = []
+    seen: set[str] = set()
+    for package_name in packages:
+        for feature_package in _iter_feature_packages(package_name):
+            if feature_package in seen:
+                continue
+            seen.add(feature_package)
+            discovered.append(feature_package)
+    return tuple(discovered)
 
 
 def _iter_feature_packages(package_name: str) -> list[str]:
@@ -238,6 +249,11 @@ def _import_optional_module(module_path: str) -> ModuleType | None:
         raise
     _module_import_cache[module_path] = module
     return module
+
+
+def import_optional_module(module_path: str) -> ModuleType | None:
+    """Import an optional module without hiding dependency import failures."""
+    return _import_optional_module(module_path)
 
 
 def _is_requested_module_missing(module_path: str, exc: ModuleNotFoundError) -> bool:

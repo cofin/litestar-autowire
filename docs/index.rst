@@ -89,11 +89,12 @@ Use string aliases for built-in integrations:
 
     AutowireConfig(
         domain_packages=["my_app.domains"],
-        extensions=["dishka", "queues"],
+        integrations=["dishka", "queues"],
     )
 
-Unknown strings fail fast. Custom behavior belongs in extension hook objects
-passed to ``extensions``.
+Unknown strings fail fast. Custom behavior belongs in integration objects passed
+to ``integrations``. Use ``AutowireLoader`` for registries that need to load
+per-domain modules with a callable such as ``"my_app.jobs:discover_jobs"``.
 
 API
 ===
@@ -101,11 +102,19 @@ API
 .. autoclass:: litestar_autowire.AutowireConfig
     :members:
 
-.. autoclass:: litestar_autowire.AutowireExtension
+.. autoclass:: litestar_autowire.AutowireContext
+    :members:
+
+.. autoclass:: litestar_autowire.AutowireIntegration
+    :members:
+
+.. autoclass:: litestar_autowire.AutowireLoader
     :members:
 
 .. autoclass:: litestar_autowire.AutowirePlugin
     :members:
+
+.. autofunction:: litestar_autowire.discover_feature_packages
 
 .. autofunction:: litestar_autowire.discover_controllers
 
