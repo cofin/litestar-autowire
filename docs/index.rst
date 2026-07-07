@@ -95,6 +95,7 @@ Use string aliases for built-in integrations:
 Unknown strings fail fast. Custom behavior belongs in integration objects passed
 to ``integrations``. Use ``AutowireLoader`` for registries that need to load
 per-domain modules with a callable such as ``"my_app.jobs:discover_jobs"``.
+Integer loader return values contribute to the startup task count.
 
 API
 ===

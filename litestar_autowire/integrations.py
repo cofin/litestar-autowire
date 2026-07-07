@@ -32,6 +32,19 @@ class AutowireContext:
     listeners: list["EventListener"]
     router_class: type[Any] | None = None
     task_names: set[str] = field(default_factory=_new_task_name_set)
+    loaded_task_count: int = 0
+
+    @property
+    def task_count(self) -> int:
+        """Return the total task count reported by integrations."""
+        return len(self.task_names) + self.loaded_task_count
+
+    def record_task_count(self, count: int) -> None:
+        """Add a task count reported by a loader integration."""
+        if count < 0:
+            msg = "Task count must be zero or greater."
+            raise ValueError(msg)
+        self.loaded_task_count += count
 
 
 class AutowireIntegration(Protocol):
@@ -89,7 +102,9 @@ class AutowireLoader:
                 module_path = f"{feature_package}.{module_name}"
                 if import_optional_module(module_path) is None:
                     continue
-                loader(module_path)
+                result = loader(module_path)
+                if isinstance(result, int) and not isinstance(result, bool):
+                    context.record_task_count(result)
 
 
 @dataclass(frozen=True, slots=True)

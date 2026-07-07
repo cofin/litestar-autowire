@@ -72,9 +72,10 @@ packages for these module names:
 - listeners: `events`, `listeners`
 - queue tasks: `jobs`
 
-With `log_discovered=True`, startup logs include the number of loaded
-controllers, domains, listeners, and tasks. Debug logs include the controller
-inventory grouped by domain.
+By default, Autowire defers discovery logs to the Litestar startup lifespan.
+The summary includes the number of loaded controllers, domains, listeners, and
+tasks. Debug logs include the controller inventory grouped by domain. Set
+`log_discovered=False` to disable these logs.
 
 ## Integrations
 
@@ -115,7 +116,8 @@ config = AutowireConfig(
 
 The loader receives existing module paths such as
 `my_app.domains.accounts.jobs`. Use the `pkg.module:func` form to make the
-module import and callable lookup explicit.
+module import and callable lookup explicit. If the loader returns an integer,
+Autowire adds it to the startup task count.
 
 For custom behavior, pass an integration object:
 

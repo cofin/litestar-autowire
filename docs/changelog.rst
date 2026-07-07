@@ -10,11 +10,13 @@ Changelog
 - Adds ``AutowireContext`` and runs built-in and custom integrations through the
   same discovery pipeline.
 - Adds ``AutowireLoader`` for loading per-domain modules with a callable or
-  ``"pkg.module:func"`` string.
+  ``"pkg.module:func"`` string. Integer loader return values contribute to the
+  startup task count.
 - Converts Dishka and Litestar Queues support into first-party integration
   objects behind the ``"dishka"`` and ``"queues"`` aliases.
 - Exposes ``discover_feature_packages()`` for users that need the same package
   traversal semantics as Autowire.
+- Defers discovery summary logging to the Litestar startup lifespan.
 
 0.1.0
 =====

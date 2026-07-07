@@ -32,7 +32,7 @@ class AutowireConfig:
         after_response: Optional hook attached to the wrapper router.
         force_reload_tasks: Re-import task modules already loaded by
             ``litestar_queues``.
-        log_discovered: Emit an info log summarizing discovered components.
+        log_discovered: Emit startup logs summarizing discovered components.
     """
 
     domain_packages: tuple[str, ...] = ()

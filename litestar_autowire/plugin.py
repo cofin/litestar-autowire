@@ -65,16 +65,40 @@ class AutowirePlugin(InitPluginProtocol):
             context.app_config.listeners.extend(context.listeners)
 
         if self.config.log_discovered:
-            logger.info(
-                "Autowire discovery complete: controllers=%d domains=%d listeners=%d tasks=%d",
-                controller_count,
-                len(controller_inventory),
-                listener_count,
-                len(context.task_names),
-            )
-            if controller_inventory:
-                logger.debug("Autowire controller inventory by domain: %s", controller_inventory)
+            self._defer_discovery_log(context, controller_count, controller_inventory, listener_count)
         return context.app_config
+
+    def _defer_discovery_log(
+        self,
+        context: AutowireContext,
+        controller_count: int,
+        controller_inventory: dict[str, list[str]],
+        listener_count: int,
+    ) -> None:
+        startup_hooks = list(context.app_config.on_startup or [])
+
+        def log_autowire_discovery() -> None:
+            self._log_discovery_summary(context, controller_count, controller_inventory, listener_count)
+
+        startup_hooks.append(log_autowire_discovery)
+        context.app_config.on_startup = startup_hooks
+
+    def _log_discovery_summary(
+        self,
+        context: AutowireContext,
+        controller_count: int,
+        controller_inventory: dict[str, list[str]],
+        listener_count: int,
+    ) -> None:
+        logger.info(
+            "Autowire discovery complete: controllers=%d domains=%d listeners=%d tasks=%d",
+            controller_count,
+            len(controller_inventory),
+            listener_count,
+            context.task_count,
+        )
+        if controller_inventory:
+            logger.debug("Autowire controller inventory by domain: %s", controller_inventory)
 
     def _register_controllers(
         self,

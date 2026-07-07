@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 from litestar import Litestar, Router, get
+from litestar.logging.config import LoggingConfig
 from litestar.testing import TestClient
 
 from litestar_autowire import (
@@ -450,7 +451,8 @@ def test_autowire_plugin_logs_loaded_domains(
 
     clear_autowire_cache()
     with caplog.at_level(logging.DEBUG, logger="litestar_autowire.plugin"):
-        Litestar(
+        app = Litestar(
+            logging_config=LoggingConfig(configure_root_logger=False),
             plugins=[
                 AutowirePlugin(
                     AutowireConfig(
@@ -460,6 +462,10 @@ def test_autowire_plugin_logs_loaded_domains(
                 )
             ],
         )
+        assert not any(record.message.startswith("Autowire discovery complete") for record in caplog.records)
+
+        startup_hook = cast("Any", app.on_startup[-1])
+        startup_hook()
 
     discovery_summary = next(
         record for record in caplog.records if record.message.startswith("Autowire discovery complete")
@@ -468,6 +474,44 @@ def test_autowire_plugin_logs_loaded_domains(
 
     assert discovery_summary.message == "Autowire discovery complete: controllers=2 domains=2 listeners=0 tasks=0"
     assert inventory.args == {"accounts": ["AccountController"], "billing": ["BillingController"]}
+
+
+def test_autowire_plugin_logs_loader_task_count_on_startup(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _create_package(tmp_path, monkeypatch)
+    _write(tmp_path / "example_app" / "features" / "accounts" / "jobs.py")
+
+    def load_jobs(module_path: str) -> int:
+        assert module_path == "example_app.features.accounts.jobs"
+        return 3
+
+    clear_autowire_cache()
+    with caplog.at_level(logging.INFO, logger="litestar_autowire.plugin"):
+        app = Litestar(
+            logging_config=LoggingConfig(configure_root_logger=False),
+            plugins=[
+                AutowirePlugin(
+                    AutowireConfig(
+                        domain_packages=("example_app.features",),
+                        discover_controllers=False,
+                        discover_listeners=False,
+                        integrations=[AutowireLoader(name="example_jobs", modules="jobs", loader=load_jobs)],
+                    ),
+                )
+            ],
+        )
+        assert not any(record.message.startswith("Autowire discovery complete") for record in caplog.records)
+
+        startup_hook = cast("Any", app.on_startup[-1])
+        startup_hook()
+
+    discovery_summary = next(
+        record for record in caplog.records if record.message.startswith("Autowire discovery complete")
+    )
+    assert discovery_summary.message == "Autowire discovery complete: controllers=0 domains=0 listeners=0 tasks=3"
 
 
 def test_autowire_plugin_registers_discovered_listeners(tmp_path: Path, monkeypatch: Any) -> None:
