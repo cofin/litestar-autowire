@@ -91,7 +91,7 @@ Built-in integrations use string aliases:
 
     AutowireConfig(
         domain_packages=["my_app.domains"],
-        extensions=["dishka", "queues"],
+        integrations=["dishka", "queues"],
     )
 
 ``dishka`` wraps discovered controllers in Dishka's Litestar router. Dishka is
@@ -102,40 +102,64 @@ not enabled merely because it is installed; configure Dishka separately with
 Litestar Queues still owns queue configuration, execution, workers, schedules,
 and task results.
 
-Unknown string aliases raise ``ValueError``. Use a hook object for custom
-behavior.
+Unknown string aliases raise ``ValueError``.
 
-Custom Extensions
-=================
+Autowire Loader
+===============
 
-Custom extension objects run after built-in discovery and can mutate Litestar's
-``AppConfig``:
+Use ``AutowireLoader`` when another registry needs each discovered domain module
+loaded:
 
 .. code-block:: python
 
-    from litestar.config.app import AppConfig
-    from litestar_autowire import AutowireConfig
+    from litestar_autowire import AutowireConfig, AutowireLoader
+
+    config = AutowireConfig(
+        domain_packages=["my_app.domains"],
+        integrations=[
+            AutowireLoader(
+                name="inventory_jobs",
+                modules="jobs",
+                loader="my_app.jobs:discover_jobs",
+            )
+        ],
+    )
+
+The loader receives existing module paths such as
+``my_app.domains.accounts.jobs``. Use the ``pkg.module:func`` form to make the
+module import and callable lookup explicit. If the loader returns an integer,
+Autowire adds it to the startup task count.
+
+Custom Integrations
+===================
+
+Custom integration objects run after built-in discovery and can mutate the
+shared Autowire context:
+
+.. code-block:: python
+
+    from litestar_autowire import AutowireConfig, AutowireContext
 
 
-    class InventoryExtension:
+    class InventoryIntegration:
         name = "inventory"
 
-        def on_autowire(self, app_config: AppConfig, config: AutowireConfig) -> AppConfig:
-            app_config.state["autowire_domain_packages"] = config.domain_packages
-            return app_config
+        def on_autowire(self, context: AutowireContext) -> None:
+            context.app_config.state["autowire_domain_packages"] = context.config.domain_packages
 
 
     config = AutowireConfig(
         domain_packages=["my_app.domains"],
-        extensions=[InventoryExtension()],
+        integrations=[InventoryIntegration()],
     )
 
-Custom extension names cannot reuse built-in names such as ``dishka`` or
+Custom integration names cannot reuse built-in names such as ``dishka`` or
 ``queues``.
 
 Discovery Logs
 ==============
 
-With ``log_discovered=True``, Autowire logs a startup summary with controller,
-domain, listener, and task counts. Debug logging includes the controller
-inventory grouped by domain.
+By default, Autowire defers discovery logs to the Litestar startup lifespan.
+The summary includes controller, domain, listener, and task counts. Debug
+logging includes the controller inventory grouped by domain. Set
+``log_discovered=False`` to disable these logs.

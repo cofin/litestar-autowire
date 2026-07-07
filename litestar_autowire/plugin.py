@@ -1,13 +1,13 @@
 """Litestar plugin for domain package-based component discovery."""
 
-import importlib
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from litestar.plugins import InitPluginProtocol
 
 from litestar_autowire.config import AutowireConfig
-from litestar_autowire.discovery import discover_controllers, discover_listeners, discover_queue_tasks
+from litestar_autowire.discovery import discover_controllers, discover_feature_packages, discover_listeners
+from litestar_autowire.integrations import AutowireContext
 
 if TYPE_CHECKING:
     from litestar import Controller
@@ -32,48 +32,80 @@ class AutowirePlugin(InitPluginProtocol):
 
     def on_app_init(self, app_config: "AppConfig") -> "AppConfig":
         """Discover configured components and add them to the app config."""
-        if not self.config.domain_packages:
-            return self._run_custom_extensions(app_config)
-
         controller_count = 0
         controller_inventory: dict[str, list[str]] = {}
         listener_count = 0
-        task_count = 0
+        feature_packages = discover_feature_packages(self.config.domain_packages) if self.config.domain_packages else ()
 
-        if self.config.discover_controllers:
+        controllers: list[type[Controller]] = []
+        if self.config.domain_packages and self.config.discover_controllers:
             controllers = discover_controllers(self.config.domain_packages, self.config.controller_modules)
             controller_count = len(controllers)
             controller_inventory = self._controller_inventory_by_domain(controllers)
-            self._register_controllers(app_config, controllers)
 
-        if self.config.discover_listeners:
+        listeners = []
+        if self.config.domain_packages and self.config.discover_listeners:
             listeners = discover_listeners(self.config.domain_packages, self.config.listener_modules)
             listener_count = len(listeners)
-            app_config.listeners.extend(listeners)
 
-        if self.config.extension_enabled("queues"):
-            task_names = discover_queue_tasks(
-                self.config.domain_packages,
-                self.config.task_modules,
-                force_reload=self.config.force_reload_tasks,
-            )
-            task_count = len(task_names)
+        context = AutowireContext(
+            app_config=app_config,
+            config=self.config,
+            feature_packages=feature_packages,
+            controllers=controllers,
+            listeners=listeners,
+            router_class=self.config.router_class,
+        )
+        for integration in self.config.integrations:
+            integration.on_autowire(context)
 
-        app_config = self._run_custom_extensions(app_config)
+        if self.config.domain_packages and self.config.discover_controllers:
+            self._register_controllers(context.app_config, context.controllers, context.router_class)
+        if self.config.domain_packages and self.config.discover_listeners:
+            context.app_config.listeners.extend(context.listeners)
 
         if self.config.log_discovered:
-            logger.info(
-                "Autowire discovery complete: controllers=%d domains=%d listeners=%d tasks=%d",
-                controller_count,
-                len(controller_inventory),
-                listener_count,
-                task_count,
-            )
-            if controller_inventory:
-                logger.debug("Autowire controller inventory by domain: %s", controller_inventory)
-        return app_config
+            self._defer_discovery_log(context, controller_count, controller_inventory, listener_count)
+        return context.app_config
 
-    def _register_controllers(self, app_config: "AppConfig", controllers: "list[type[Controller]]") -> None:
+    def _defer_discovery_log(
+        self,
+        context: AutowireContext,
+        controller_count: int,
+        controller_inventory: dict[str, list[str]],
+        listener_count: int,
+    ) -> None:
+        startup_hooks = list(context.app_config.on_startup or [])
+
+        def log_autowire_discovery() -> None:
+            self._log_discovery_summary(context, controller_count, controller_inventory, listener_count)
+
+        startup_hooks.append(log_autowire_discovery)
+        context.app_config.on_startup = startup_hooks
+
+    def _log_discovery_summary(
+        self,
+        context: AutowireContext,
+        controller_count: int,
+        controller_inventory: dict[str, list[str]],
+        listener_count: int,
+    ) -> None:
+        logger.info(
+            "Autowire discovery complete: controllers=%d domains=%d listeners=%d tasks=%d",
+            controller_count,
+            len(controller_inventory),
+            listener_count,
+            context.task_count,
+        )
+        if controller_inventory:
+            logger.debug("Autowire controller inventory by domain: %s", controller_inventory)
+
+    def _register_controllers(
+        self,
+        app_config: "AppConfig",
+        controllers: "list[type[Controller]]",
+        router_class: "type[Any] | None",
+    ) -> None:
         if not controllers:
             logger.warning(
                 "Autowire discovered no controllers in domain packages: %s",
@@ -81,7 +113,6 @@ class AutowirePlugin(InitPluginProtocol):
             )
             return
 
-        router_class = self._resolve_router_class()
         if router_class is None:
             app_config.route_handlers.extend(controllers)
             return
@@ -94,25 +125,6 @@ class AutowirePlugin(InitPluginProtocol):
                 after_response=self.config.after_response,
             )
         )
-
-    def _resolve_router_class(self) -> "type[Any] | None":
-        if self.config.router_class is not None:
-            return self.config.router_class
-        if not self.config.extension_enabled("dishka"):
-            return None
-        try:
-            litestar_integration = importlib.import_module("dishka.integrations.litestar")
-        except ModuleNotFoundError as exc:
-            if exc.name == "dishka":
-                msg = "Dishka router support requires the optional 'litestar-autowire[dishka]' dependency."
-                raise RuntimeError(msg) from exc
-            raise
-        return cast("type[Any]", litestar_integration.DishkaRouter)
-
-    def _run_custom_extensions(self, app_config: "AppConfig") -> "AppConfig":
-        for extension in self.config.custom_extensions:
-            app_config = extension.on_autowire(app_config, self.config)
-        return app_config
 
     def _controller_inventory_by_domain(self, controllers: "list[type[Controller]]") -> dict[str, list[str]]:
         inventory: dict[str, list[str]] = {}

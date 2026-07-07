@@ -2,13 +2,11 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, TypeGuard, cast
+from typing import Any
 
-from litestar_autowire.extensions import AutowireExtension
+from litestar_autowire.integrations import AutowireIntegration, AutowireIntegrationsInput, normalize_integrations
 
-SUPPORTED_EXTENSIONS = frozenset({"dishka", "queues"})
-AutowireExtensionInput = str | AutowireExtension
-AutowireExtensionsInput = Iterable[AutowireExtensionInput] | AutowireExtensionInput
+SUPPORTED_INTEGRATIONS = frozenset({"dishka", "queues"})
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -19,8 +17,8 @@ class AutowireConfig:
         domain_packages: Dotted domain package names to inspect. Each package
             and its direct child packages are checked for configured
             controller, listener, and task submodules.
-        extensions: Optional built-in integration names or custom extension
-            hook objects. Supported built-in values are ``"dishka"`` to wrap
+        integrations: Optional built-in integration names or custom integration
+            objects. Supported built-in values are ``"dishka"`` to wrap
             discovered controllers in Dishka's Litestar router and ``"queues"``
             to import task modules with ``litestar_queues.discover_tasks``.
         discover_controllers: Register discovered ``Controller`` subclasses.
@@ -34,11 +32,11 @@ class AutowireConfig:
         after_response: Optional hook attached to the wrapper router.
         force_reload_tasks: Re-import task modules already loaded by
             ``litestar_queues``.
-        log_discovered: Emit an info log summarizing discovered components.
+        log_discovered: Emit startup logs summarizing discovered components.
     """
 
     domain_packages: tuple[str, ...] = ()
-    extensions: tuple[AutowireExtensionInput, ...] = ()
+    integrations: tuple[AutowireIntegration, ...] = ()
     discover_controllers: bool = True
     discover_listeners: bool = True
     controller_modules: tuple[str, ...] = ("controllers", "routes", "controller", "route")
@@ -54,7 +52,7 @@ class AutowireConfig:
         self,
         *,
         domain_packages: Iterable[str] | str = (),
-        extensions: AutowireExtensionsInput = (),
+        integrations: AutowireIntegrationsInput = (),
         discover_controllers: bool = True,
         discover_listeners: bool = True,
         controller_modules: Iterable[str] | str = ("controllers", "routes", "controller", "route"),
@@ -65,13 +63,15 @@ class AutowireConfig:
         after_response: Any | None = None,
         force_reload_tasks: bool = False,
         log_discovered: bool = True,
+        extensions: Any | None = None,
     ) -> None:
         """Initialize and normalize discovery configuration."""
-        normalized_extensions = _as_extension_tuple(extensions)
-        _validate_extensions(normalized_extensions)
+        if extensions is not None:
+            msg = "AutowireConfig.extensions was renamed to integrations. Use integrations=[...]."
+            raise TypeError(msg)
 
         object.__setattr__(self, "domain_packages", _as_tuple(domain_packages))
-        object.__setattr__(self, "extensions", normalized_extensions)
+        object.__setattr__(self, "integrations", normalize_integrations(integrations))
         object.__setattr__(self, "discover_controllers", discover_controllers)
         object.__setattr__(self, "discover_listeners", discover_listeners)
         object.__setattr__(self, "controller_modules", _as_tuple(controller_modules))
@@ -83,67 +83,12 @@ class AutowireConfig:
         object.__setattr__(self, "force_reload_tasks", force_reload_tasks)
         object.__setattr__(self, "log_discovered", log_discovered)
 
-    def extension_enabled(self, name: str) -> bool:
-        """Return whether a built-in optional integration is enabled."""
-        return name in self.extension_names
-
-    @property
-    def extension_names(self) -> tuple[str, ...]:
-        """Return enabled built-in extension names."""
-        return tuple(extension for extension in self.extensions if isinstance(extension, str))
-
-    @property
-    def custom_extensions(self) -> tuple[AutowireExtension, ...]:
-        """Return custom extension hook objects."""
-        return tuple(extension for extension in self.extensions if not isinstance(extension, str))
+    def integration_enabled(self, name: str) -> bool:
+        """Return whether an integration with ``name`` is enabled."""
+        return any(integration.name == name for integration in self.integrations)
 
 
 def _as_tuple(value: Iterable[str] | str) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     return tuple(value)
-
-
-def _as_extension_tuple(value: AutowireExtensionsInput) -> tuple[AutowireExtensionInput, ...]:
-    if isinstance(value, str):
-        return (value,)
-    if _is_autowire_extension(value):
-        return (value,)
-    try:
-        return tuple(cast("Iterable[AutowireExtensionInput]", value))
-    except TypeError as exc:
-        msg = "Autowire extensions must be strings, extension objects, or iterables of those values."
-        raise TypeError(msg) from exc
-
-
-def _validate_extensions(extensions: tuple[AutowireExtensionInput, ...]) -> None:
-    unknown = sorted(
-        extension for extension in extensions if isinstance(extension, str) and extension not in SUPPORTED_EXTENSIONS
-    )
-    if unknown:
-        msg = f"Unsupported Autowire extension(s): {', '.join(unknown)}"
-        raise ValueError(msg)
-
-    for extension in extensions:
-        if isinstance(extension, str):
-            continue
-        _validate_custom_extension(extension)
-
-
-def _validate_custom_extension(extension: object) -> None:
-    name = getattr(extension, "name", None)
-    hook = getattr(extension, "on_autowire", None)
-    if not isinstance(name, str) or not name or not callable(hook):
-        msg = "Autowire extension objects must define a non-empty string 'name' and callable 'on_autowire'."
-        raise TypeError(msg)
-    if name in SUPPORTED_EXTENSIONS:
-        msg = f"Custom Autowire extension name conflict with built-in extension: {name}"
-        raise ValueError(msg)
-
-
-def _is_autowire_extension(value: object) -> TypeGuard[AutowireExtension]:
-    if isinstance(value, str):
-        return False
-    name = getattr(value, "name", None)
-    hook = getattr(value, "on_autowire", None)
-    return isinstance(name, str) and callable(hook)
